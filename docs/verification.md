@@ -15,7 +15,7 @@ Git review tests include staged/working/new files, a non-Git folder, untrusted G
 
 ## Environment-dependent checks
 
-The normal live Cloudflare quick-tunnel attempt reaches tunnel registration, but this machine's resolver returns ENOTFOUND for its generated hostname. Public DNS resolves that hostname. A separate explicit public-DNS fixture check is available; normal application DNS is never changed.
+The normal live Cloudflare quick-tunnel attempt reaches tunnel registration, but this machine's resolver returns ENOTFOUND for its generated hostname. Public DNS resolves that hostname. The explicit public-DNS fixture check passed owner login, OAuth, official SDK access, a real Docker file read, workspace denial, refresh, and revocation. Normal application DNS is never changed; the default DNS path on this machine remains unverified after its failures.
 
 Named Cloudflare account/domain verification requires an existing locally managed tunnel, credentials file, and DNS route. Validation and CLI argument construction are automated; no account-backed named tunnel is claimed verified here.
 

@@ -65,15 +65,20 @@ try {
   if (process.argv.includes('--public-dns')) {
     // Test-only fallback for hosts whose resolver blocks provider domains. Never applied to the app.
     const hostname = new URL(publicUrl).hostname;
-    const answer = await (
-      await fetch(
-        'https://dns.google/resolve?' + new URLSearchParams({ name: hostname, type: 'A' }),
-        { signal: AbortSignal.timeout(15000) },
-      )
-    ).json();
-    const addresses = (answer.Answer || [])
-      .filter((a: any) => a.type === 1)
-      .map((a: any) => ({ address: a.data, family: 4 }));
+    let addresses: { address: string; family: number }[] = [];
+    for (let attempt = 0; attempt < 45; attempt++) {
+      const answer = await (
+        await fetch(
+          'https://dns.google/resolve?' + new URLSearchParams({ name: hostname, type: 'A' }),
+          { signal: AbortSignal.timeout(15000) },
+        )
+      ).json();
+      addresses = (answer.Answer || [])
+        .filter((a: any) => a.type === 1)
+        .map((a: any) => ({ address: a.data, family: 4 }));
+      if (addresses.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
     assert.ok(addresses.length, 'Public DNS must resolve the tunnel hostname');
     dns.lookup = ((host: string, options: any, callback?: any) => {
       if (host !== hostname)
