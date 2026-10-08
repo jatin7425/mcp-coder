@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCP Code · Owner login</title>
+    <link rel="stylesheet" href="/remote-login.css" />
+  </head>
+  <body>
+    <main>
+      <div class="brand">MCP Code</div>
+      <h1>Connect to your workspace runtime</h1>
+      <p>
+        Enter the temporary login code from <strong>Remote access</strong> in your local dashboard.
+      </p>
+      <form id="login">
+        <label for="code">Owner login code</label
+        ><input
+          id="code"
+          name="code"
+          type="password"
+          autocomplete="one-time-code"
+          required
+          maxlength="128"
+        /><button type="submit">Open dashboard</button>
+        <p id="error" role="alert"></p>
+      </form>
+      <p class="note">
+        Only the owner can approve agent access. MCP clients use their own OAuth or bearer
+        credentials.
+      </p>
+    </main>
+    <script src="/remote-login.js" type="module"></script>
+  </body>
+</html>

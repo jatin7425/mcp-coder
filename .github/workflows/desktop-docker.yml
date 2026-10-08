@@ -1,0 +1,30 @@
+name: Native Docker Desktop verification
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: Registered self-hosted machine with Docker Desktop running in Linux-container mode
+        required: true
+        type: choice
+        options: [Windows, macOS]
+permissions:
+  contents: read
+jobs:
+  desktop-docker:
+    runs-on: [self-hosted, '${{ inputs.host }}', mcp-code-desktop]
+    timeout-minutes: 25
+    env:
+      MCP_CODE_REQUIRE_DOCKER: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run sandbox:build
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install chromium
+      - run: npm run test:ui
+      - run: npm run test:package

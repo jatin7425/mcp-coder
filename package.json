@@ -1,0 +1,58 @@
+{
+  "name": "mcp-code",
+  "version": "0.1.0",
+  "description": "Local-first sandboxed coding runtime for MCP clients",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "mcp-code": "dist/apps/cli/main.js",
+    "mcp-code-stdio": "dist/apps/cli/stdio.js"
+  },
+  "files": [
+    "dist",
+    "apps/web",
+    "Dockerfile.sandbox",
+    "README.md",
+    "LICENSE",
+    "docs",
+    ".dockerignore"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx apps/cli/main.ts",
+    "build": "tsc",
+    "start": "node dist/apps/cli/main.js",
+    "test": "tsx --test tests/core.test.ts tests/platform.test.ts tests/integration.test.ts tests/oauth.test.ts",
+    "lint": "tsc --noEmit && node --check apps/web/app.js",
+    "sandbox:build": "docker build -f Dockerfile.sandbox -t mcp-code-sandbox:0.1 .",
+    "prepack": "npm run build",
+    "test:ui": "tsx --test tests/browser.test.ts",
+    "format": "prettier --write apps packages tests scripts docs package.json tsconfig.json README.md",
+    "test:package": "npm run build && node scripts/package-check.mjs",
+    "verify": "npm run build && npm run lint && npm test && npm run test:ui",
+    "test:core": "tsx --test tests/core.test.ts tests/platform.test.ts",
+    "test:live:ngrok": "tsx scripts/live-connection-check.ts ngrok",
+    "test:live:cloudflare": "tsx scripts/live-connection-check.ts cloudflare"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "express": "^5.1.0",
+    "open": "^10.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ]
+}
