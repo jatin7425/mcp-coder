@@ -124,6 +124,35 @@ test('real Docker + MCP + management lifecycle', async (t) => {
     assert.ok(!result.isError, JSON.stringify(result));
     return result.structuredContent as any;
   }
+  await t.test(
+    'owner change review handles repositories, staged edits, new files and unsafe Git configuration',
+    async () => {
+      const endpoint = `/workspaces/${workspace.id}/changes`;
+      assert.equal((await api(endpoint, 'GET')).repository, false);
+      const prepared = data(
+        await call('terminal_execute', {
+          command:
+            "git init -q && git config user.email test@example.com && git config user.name Test && git add sum.js && git commit -qm initial && printf 'staged\\n' > tracked.txt && git add tracked.txt && printf 'working\\n' >> sum.js && printf '<script>bad()</script>' > new.txt && git config core.fsmonitor 'touch /workspace/should-not-exist' && git config diff.external 'touch /workspace/should-not-exist'",
+        }),
+      );
+      assert.equal(prepared.exitCode, 0);
+      const review = await api(endpoint, 'GET');
+      assert.equal(review.repository, true);
+      assert.match(review.staged, /staged/);
+      assert.match(review.working, /working/);
+      assert.ok(
+        review.untracked.some((f: any) => f.path === 'new.txt' && f.text.includes('<script>')),
+      );
+      assert.ok(!JSON.stringify(review).includes('HOST_SECRET_SHOULD_NOT_BE_READ'));
+      await assert.rejects(access(join(project, 'should-not-exist')));
+      data(
+        await call('terminal_execute', {
+          command:
+            'git config --unset core.fsmonitor && git config --unset diff.external && git checkout -- sum.js',
+        }),
+      );
+    },
+  );
   await t.test('actual MCP initialization, discovery and workspace info', async () => {
     const listed = await client.listTools();
     assert.ok(listed.tools.some((tool) => tool.name === 'list_workspaces'));

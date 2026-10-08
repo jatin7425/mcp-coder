@@ -104,6 +104,27 @@ export class WorkspaceOAuthProvider implements OAuthServerProvider {
       },
     };
   }
+  publicClients() {
+    return this.store.state.oauthClients!.map(({ client_id, client_name, redirect_uris }) => ({
+      client_id,
+      client_name,
+      redirect_uris,
+    }));
+  }
+  async removeClient(id: string) {
+    if (!this.store.state.oauthClients!.some((c) => c.client_id === id))
+      throw new AppError('OAuth client not found.', 404);
+    this.store.state.oauthClients = this.store.state.oauthClients!.filter(
+      (c) => c.client_id !== id,
+    );
+    for (const [key, request] of this.pending)
+      if (request.client.client_id === id) this.pending.delete(key);
+    for (const [key, code] of this.codes) if (code.client.client_id === id) this.codes.delete(key);
+    const affected = this.store.state.tokens.filter((t) => t.oauth?.clientId === id);
+    for (const token of affected) token.revokedAt = new Date().toISOString();
+    await this.store.save();
+    await Promise.all(affected.map((token) => this.cancelToken(token.id)));
+  }
   credentialGuard: RequestHandler = (req, res, next) => {
     if (req.method !== 'POST') return next();
     const client = this.store.state.oauthClients!.find((c) => c.client_id === req.body?.client_id);

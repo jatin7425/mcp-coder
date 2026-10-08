@@ -1,3 +1,4 @@
+import { workspaceChanges } from '../review/changes.js';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import type { Server } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -75,6 +76,8 @@ export async function startRuntime(
   try {
     const store = await new JsonStore(directory).load();
     const { uiPort, mcpPort } = store.state.settings;
+    for (const [id, config] of Object.entries(store.state.tunnelConfigs || {}))
+      tunnels.configure(id, config);
     if (
       !Number.isInteger(uiPort) ||
       !Number.isInteger(mcpPort) ||
@@ -172,6 +175,8 @@ export async function startRuntime(
           activeWorkspaceId: store.state.activeWorkspaceId,
           tokens: tokens.publicRecords(),
           oauthRequests: oauth.requests(),
+          oauthClients: oauth.publicClients(),
+          tunnelConfigs: store.state.tunnelConfigs || {},
           sandbox: cachedSandbox,
           imageBuild: docker.buildStatus,
           tunnel: tunnels.status(),
@@ -180,6 +185,13 @@ export async function startRuntime(
           clients: [...clients.entries()].map(([id, client]) => ({ id, ...client })),
           settings: store.state.settings,
         });
+      }),
+    );
+    ui.delete(
+      '/api/oauth/clients/:id',
+      wrap(async (req, res) => {
+        await oauth.removeClient(String(req.params.id));
+        res.json({ ok: true });
       }),
     );
     ui.post(
@@ -230,6 +242,14 @@ export async function startRuntime(
       wrap(async (req, res) => {
         const input = z
           .object({
+            resources: z
+              .object({
+                memoryMb: z.number().int().min(256).max(32768),
+                cpus: z.number().min(0.5).max(16).multipleOf(0.5),
+                timeoutSeconds: z.number().int().min(1).max(3600),
+              })
+              .strict()
+              .optional(),
             permissions: permissionsSchema.optional(),
             approvalMode: z.enum(['autonomous', 'ask']).optional(),
             name: z.string().min(1).max(80).optional(),
@@ -365,6 +385,49 @@ export async function startRuntime(
         res.json(await tunnels.availability());
       }),
     );
+    ui.get(
+      '/api/diagnostics',
+      wrap(async (_req, res) => {
+        cachedSandbox = await docker.availability();
+        lastCheck = Date.now();
+        res.json({
+          sandbox: cachedSandbox,
+          providers: await tunnels.diagnostics(),
+          mcpEnabled,
+          checkedAt: new Date().toISOString(),
+        });
+      }),
+    );
+    ui.put(
+      '/api/tunnels/config/:id',
+      wrap(async (req, res) => {
+        const id = String(req.params.id);
+        const config = tunnels.configure(id, req.body);
+        store.state.tunnelConfigs ||= {};
+        store.state.tunnelConfigs[id] = config;
+        await store.save();
+        res.json(config);
+      }),
+    );
+    let reviewing = false;
+    ui.get(
+      '/api/workspaces/:id/changes',
+      wrap(async (req, res) => {
+        if (reviewing)
+          throw new AppError('A change review is already running. Try again shortly.', 429);
+        const workspace = workspaces.get(String(req.params.id));
+        reviewing = true;
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        res.once('close', abort);
+        try {
+          res.json(await workspaceChanges(docker, workspace, controller.signal));
+        } finally {
+          reviewing = false;
+          res.off('close', abort);
+        }
+      }),
+    );
     ui.post(
       '/api/tunnels/start',
       wrap(async (req, res) => {
@@ -424,6 +487,10 @@ export async function startRuntime(
     const packagedWeb = fileURLToPath(new URL('../../../apps/web/', import.meta.url));
     const web = import.meta.url.includes('/dist/packages/') ? packagedWeb : sourceWeb;
     const remoteDashboard = new RemoteDashboard(uiPort, () => tunnels.status().publicUrl, web);
+    ui.post('/api/remote/logout-all', (_req, res) => {
+      remoteDashboard.clear();
+      res.json({ ok: true });
+    });
     ui.post('/api/remote/code', (_req, res, next) => {
       try {
         res.json(remoteDashboard.createCode());

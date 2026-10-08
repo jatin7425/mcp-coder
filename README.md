@@ -104,7 +104,7 @@ For a source checkout, use `node` as the command and the absolute path to `dist/
 { "command": "npm test", "timeout": 120000, "cwd": "/workspace", "background": false }
 ```
 
-Normal terminal calls return `id`, `exitCode`, `stdout`, `stderr`, `duration`, `truncated`, `timedOut`, and `cancelled`. Background and approval-mode calls return a job record; poll with `terminal_status`. Timeout is capped at five minutes, output at 256 KiB, and concurrent commands at eight overall / three per client. Completed output stays in memory, bounded to 100 jobs, and is discarded on restart. Stateless HTTP accepts POST; a persistent SSE session is not required.
+Normal terminal calls return `id`, `exitCode`, `stdout`, `stderr`, `duration`, `truncated`, `timedOut`, and `cancelled`. Background and approval-mode calls return a job record; poll with `terminal_status`. Timeout is capped by the workspace setting (five minutes by default, up to one hour), output at 256 KiB, and concurrent commands at eight overall / three per client. Completed output stays in memory, bounded to 100 jobs, and is discarded on restart. Stateless HTTP accepts POST; a persistent SSE session is not required.
 
 ## Permissions and approvals
 
@@ -121,7 +121,7 @@ Each command runs in a fresh, non-root Docker container with:
 - Only the selected project bound at `/workspace`; no host home or Docker socket.
 - A read-only system filesystem and ephemeral `/tmp` and home.
 - All Linux capabilities dropped and no-new-privileges enabled.
-- 512 MiB memory, one CPU, and 128-process limits.
+- Configurable per-command memory and CPU limits (512 MiB and one CPU by default), plus a 128-process limit.
 - Network disabled unless both workspace and token grant it.
 - Forced container removal on timeout/cancel and cleanup after normal exit.
 
@@ -186,3 +186,17 @@ The small dashboard uses native browser modules to keep installation and packagi
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+### Workspace resources and connection cleanup
+
+Choose **Workspaces → Resources** to set memory (256–32768 MB), CPU (0.5–16 cores), and maximum command time (1–3600 seconds). Existing workspaces keep the original defaults. Limits apply per command; concurrent commands can consume more in total. Saving cancels running and pending commands in that workspace. Requested command timeouts are capped at the workspace limit.
+
+**Connections → Registered OAuth clients → Remove client** removes a registration, revokes all its grants, cancels its commands, and invalidates pending approvals and authorization codes. The client must register and obtain consent again. **Remote access → Sign out all remote sessions** signs out every remote owner browser and invalidates unused login codes without revoking agent access.
+
+### Connection checks, stable addresses, and change review
+
+Remote access → **Check connections** checks Docker, the sandbox image, MCP availability, and native provider setup. It offers image build recovery and provider setup guidance. Provider checks do not prove account authorization or public DNS reachability; starting a tunnel and connecting a client tests those. Failed tunnels can be started again after correcting their setup.
+
+Use **Configure address** in the ngrok or Cloudflare tab while the tunnel is stopped. ngrok accepts an HTTPS domain already available to your account. Cloudflare accepts an existing locally managed tunnel UUID, its native credentials file's absolute path, and a hostname already routed to that tunnel. MCP Code uses a temporary isolated configuration so unrelated native ingress rules are not exposed. Both modes forward only the MCP Code gateway, serving the dashboard, OAuth, and MCP together. No provider secrets are copied into application state. See [stable tunnel setup](docs/remote-setup.md).
+
+**Changes** shows staged and working Git diffs plus bounded previews of new files for a selected workspace. It includes human and agent edits; it cannot attribute changes to a particular author. Review uses a read-only, network-disabled Docker container with external diff/text-conversion and filesystem-monitor hooks disabled. Reviews are snapshots refreshed with **Load changes**. Large reviews are explicitly truncated. Non-Git folders and worktrees whose Git metadata is outside the mounted workspace cannot provide a Git review.

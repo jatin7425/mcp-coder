@@ -1,3 +1,4 @@
+import type { TunnelConfig } from '../tunnel-manager/config.js';
 export const permissionKeys = ['read', 'write', 'execute', 'git', 'network'] as const;
 export type Permissions = Record<(typeof permissionKeys)[number], boolean>;
 export const defaultPermissions: Permissions = {
@@ -7,7 +8,9 @@ export const defaultPermissions: Permissions = {
   git: true,
   network: false,
 };
+export const defaultResources = { memoryMb: 512, cpus: 1, timeoutSeconds: 300 };
 export interface Workspace {
+  resources?: typeof defaultResources;
   id: string;
   name: string;
   path: string;
@@ -64,6 +67,7 @@ export interface AppState {
   settings: { uiPort: number; mcpPort: number; retentionDays: number };
   audit: AuditEntry[];
   oauthClients?: OAuthClientRecord[];
+  tunnelConfigs?: Record<string, TunnelConfig>;
 }
 export interface Principal {
   tokenId: string;

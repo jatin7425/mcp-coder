@@ -250,3 +250,103 @@ test('native tunnel stop cancels startup and leaves no connected status', async 
   await rejected;
   assert.equal(provider.status().state, 'stopped');
 });
+
+test('workspace resource settings reach Docker without weakening isolation', async (t) => {
+  const f = await fixture(t);
+  f.workspace.resources = { memoryMb: 2048, cpus: 2.5, timeoutSeconds: 600 };
+  const args = dockerArguments(
+    {
+      id: 'resources',
+      workspace: f.workspace,
+      permissions: defaultPermissions,
+      input: { command: 'pwd', cwd: '/workspace', timeout: 1000 },
+      signal: new AbortController().signal,
+    },
+    'test',
+  );
+  for (const flag of [
+    '--memory=2048m',
+    '--memory-swap=2048m',
+    '--cpus=2.5',
+    '--read-only',
+    '--cap-drop=ALL',
+  ])
+    assert.ok(args.includes(flag));
+});
+
+test('terminal caps requested timeout at workspace limit and preserves shorter requests', async (t) => {
+  const { TerminalManager } = await import('../packages/terminal/manager.js');
+  const { AuditLogger } = await import('../packages/audit/store.js');
+  const f = await fixture(t);
+  f.workspace.resources = { memoryMb: 512, cpus: 1, timeoutSeconds: 10 };
+  const issued = await f.tokens.create('test', f.workspace.id, defaultPermissions);
+  const seen: number[] = [];
+  const terminal = new TerminalManager(
+    {
+      id: 'fixture',
+      async availability() {
+        return { available: true, imageReady: true, detail: '' };
+      },
+      async recover() {},
+      async stopAll() {},
+      async execute(execution) {
+        seen.push(execution.input.timeout);
+        return {
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          duration: 0,
+          truncated: false,
+          timedOut: false,
+          cancelled: false,
+        };
+      },
+    },
+    f.workspaces,
+    f.tokens,
+    new AuditLogger(f.store),
+  );
+  t.after(() => terminal.stop());
+  for (const timeout of [600000, 500]) {
+    const job = await terminal.submit(f.tokens.verify(issued.token), {
+      command: 'pwd',
+      cwd: '/workspace',
+      timeout,
+    });
+    await terminal.wait(job.id);
+  }
+  assert.deepEqual(seen, [10000, 500]);
+});
+
+test('stable tunnel configuration validates origins and forwards the gateway port', async () => {
+  const { tunnelConfigSchema } = await import('../packages/tunnel-manager/config.js');
+  const { cloudflareArguments } = await import('../packages/tunnel-manager/cloudflare.js');
+  const config = tunnelConfigSchema.parse({
+    mode: 'cloudflare-named',
+    publicUrl: 'https://mcp.example.com/',
+    tunnelId: '12345678-1234-4234-8234-123456789012',
+    credentialsFile: '/native/credentials.json',
+  });
+  assert.equal(config.publicUrl, 'https://mcp.example.com');
+  const args = cloudflareArguments(9876, config, '/isolated/config.json');
+  assert.ok(args.includes('http://127.0.0.1:9876'));
+  assert.ok(args.includes('/native/credentials.json'));
+  assert.ok(args.includes('/isolated/config.json'));
+  assert.ok(ngrokArguments(9876, 'https://mcp.example.com').includes('https://mcp.example.com'));
+  for (const publicUrl of [
+    'http://mcp.example.com',
+    'https://user:secret@mcp.example.com',
+    'https://mcp.example.com/mcp',
+    'https://mcp.example.com?token=secret',
+  ])
+    assert.throws(() => tunnelConfigSchema.parse({ mode: 'ngrok-domain', publicUrl }));
+  const manager = new TunnelManager();
+  assert.throws(
+    () =>
+      manager.configure('cloudflare', {
+        mode: 'ngrok-domain',
+        publicUrl: 'https://mcp.example.com',
+      }),
+    /does not match/,
+  );
+});

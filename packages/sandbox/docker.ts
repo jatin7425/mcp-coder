@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { resolve, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SandboxExecution, SandboxProvider } from './provider.js';
-import { AppError, type CommandResult } from '../shared/types.js';
+import { AppError, defaultResources, type CommandResult } from '../shared/types.js';
 import { sandboxIdentity, dockerMountSource } from '../shared/platform.js';
 import { validateWorkspace } from '../workspace/manager.js';
 const exec = promisify(execFile);
@@ -23,6 +23,7 @@ export function dockerArguments(
   platform: NodeJS.Platform = process.platform,
 ): string[] {
   const { workspace, permissions, input, id } = execution;
+  const resources = workspace.resources || defaultResources;
   const { uid, gid } = sandboxIdentity(platform);
   return [
     'run',
@@ -36,9 +37,9 @@ export function dockerArguments(
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges',
     '--read-only',
-    '--memory=512m',
-    '--memory-swap=512m',
-    '--cpus=1',
+    `--memory=${resources.memoryMb}m`,
+    `--memory-swap=${resources.memoryMb}m`,
+    `--cpus=${resources.cpus}`,
     '--pids-limit=128',
     '--network',
     permissions.network ? 'bridge' : 'none',

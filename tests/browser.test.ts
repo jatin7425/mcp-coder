@@ -93,6 +93,18 @@ test('dashboard workflows and responsive layout in Chromium', async (t) => {
     .getByRole('button', { name: 'Add workspace', exact: true })
     .click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Resources', exact: true }).click();
+  await page.getByLabel('Memory (MB)').fill('2048');
+  await page.getByLabel('CPU cores').fill('2');
+  await page.getByLabel('Maximum command time (seconds)').fill('600');
+  await page.getByRole('button', { name: 'Save resources' }).click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.deepEqual(runtime.store.state.workspaces[0].resources, {
+    memoryMb: 2048,
+    cpus: 2,
+    timeoutSeconds: 600,
+  });
+
   await page.getByRole('link', { name: 'Permissions', exact: true }).first().click();
   await page.getByRole('heading', { name: 'Workspace access' }).waitFor();
   await page.getByRole('checkbox', { name: 'Network access' }).check();
@@ -310,6 +322,40 @@ test('dashboard workflows and responsive layout in Chromium', async (t) => {
   await remotePage.getByRole('heading', { name: 'Connect to your workspace runtime' }).waitFor();
   await remotePage.close();
   await localApi('/tunnels/stop', {});
+  await page.getByRole('link', { name: 'Remote access', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Check connections', exact: true }).click();
+  await page.getByText('Accepting authenticated connections.', { exact: true }).waitFor();
+  await page.getByRole('tab', { name: 'ngrok', exact: true }).click();
+  await page.getByRole('button', { name: 'Configure address', exact: true }).click();
+  await page.getByLabel('Address mode').selectOption('ngrok-domain');
+  await page.getByLabel('Public HTTPS address').fill('https://mcp.example.com');
+  await page.getByRole('button', { name: 'Save address', exact: true }).click();
+  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  assert.equal(runtime.store.state.tunnelConfigs?.ngrok.mode, 'ngrok-domain');
+  await page.route('**/api/workspaces/*/changes', (route) =>
+    route.fulfill({
+      json: {
+        repository: true,
+        files: [{ status: ' M', path: '<script>bad()</script>' }],
+        staged: '',
+        working: '+<script>bad()</script>',
+        untracked: [],
+        truncated: false,
+      },
+    }),
+  );
+  await page.getByRole('link', { name: 'Changes', exact: true }).click();
+  await page.getByRole('button', { name: 'Load changes', exact: true }).click();
+  await page.getByRole('heading', { name: 'Working changes', exact: true }).waitFor();
+  assert.ok(await page.getByText('+<script>bad()</script>', { exact: true }).isVisible());
+  await page.screenshot({ path: join(tmpdir(), 'mcp-code-changes.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('link', { name: 'Connections', exact: true }).click();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Remove client', exact: true }).first().click();
+  await page.getByText('No registered OAuth clients.', { exact: true }).waitFor();
   for (const name of ['Remote access', 'Activity', 'Settings', 'Dashboard']) {
     await page.getByRole('link', { name, exact: true }).first().click();
     await page.waitForTimeout(200);

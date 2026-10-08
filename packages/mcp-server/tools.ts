@@ -10,7 +10,7 @@ export const toolSchemas = {
   terminal_execute: z.object({
     workspaceId: z.string().uuid().optional(),
     command: z.string().min(1).max(16384),
-    timeout: z.number().int().min(100).max(300000).default(120000),
+    timeout: z.number().int().min(100).max(3600000).default(120000),
     cwd: z.string().max(4096).default('/workspace'),
     background: z.boolean().default(false),
   }),

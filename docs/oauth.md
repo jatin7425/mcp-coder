@@ -11,7 +11,7 @@
 
 The agent sees only approved projects through `list_workspaces`. Tools that read or execute accept an optional `workspaceId` from that list. Without it, the first available approved workspace is used. Each command mounts exactly one project. The dashboard's active-workspace switch does not change an OAuth grant or cancel its jobs. Removing a workspace cancels only jobs in that workspace and removes it from every OAuth grant. Other approved workspaces remain accessible; removing the last approved workspace revokes the grant and its refresh token. Manual bearer tokens continue to follow the active workspace.
 
-A grant captures each selected workspace's permission ceiling. Later reductions take effect immediately, while increasing workspace permissions cannot silently broaden an existing grant. Remove/revoke the connection and authorize again to approve new projects or expanded permissions. Connections lists the selected projects and lets the owner revoke a grant. Current workspace command approval mode still applies.
+A grant captures each selected workspace's permission ceiling. Later reductions take effect immediately, while increasing workspace permissions cannot silently broaden an existing grant. Remove/revoke the connection and authorize again to approve new projects or expanded permissions. Connections lists the selected projects and lets the owner revoke a grant. Removing a registered OAuth client revokes all its grants, cancels its commands, and invalidates its pending approvals and authorization codes. Current workspace command approval mode still applies.
 
 ## One public address
 
@@ -28,7 +28,7 @@ Both native providers forward the gateway listener, normally port 7866. It serve
 
 The internal dashboard listener remains on loopback. Public owner requests are authenticated before proxying to it. Owner cookies do not authenticate MCP tools, and agent tokens do not authorize management APIs. Stopping MCP cancels command work but keeps the owner dashboard reachable; **Stop tunnel** closes public access entirely.
 
-In the local dashboard, choose **Remote access → Create remote login code** after starting a tunnel. Copy the one-time code and enter it at the public address. It expires after five minutes; the resulting owner session lasts eight hours. Codes and sessions are memory-only hashes, lost on daemon restart, and bound to the public origin. Sign out from the public Remote access page. Tunnel addresses can change between runs, requiring clients to authorize again for the new resource URL.
+In the local dashboard, choose **Remote access → Create remote login code** after starting a tunnel. Copy the one-time code and enter it at the public address. It expires after five minutes; the resulting owner session lasts eight hours. Codes and sessions are memory-only hashes, lost on daemon restart, and bound to the public origin. Sign out from the public Remote access page, or choose **Sign out all remote sessions** to invalidate all owner sessions and unused login codes. Agent grants are unaffected. Tunnel addresses can change between runs, requiring clients to authorize again for the new resource URL.
 
 ## Protocol and lifetime
 

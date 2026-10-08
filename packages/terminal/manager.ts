@@ -1,3 +1,4 @@
+import { defaultResources } from '../shared/types.js';
 import { randomUUID } from 'node:crypto';
 import type { SandboxProvider } from '../sandbox/provider.js';
 import type { WorkspaceManager } from '../workspace/manager.js';
@@ -85,8 +86,13 @@ export class TerminalManager implements SessionStore {
       throw error;
     }
     normalizeCwd(input.cwd);
-    if (input.command.length > 16_384 || input.timeout < 100 || input.timeout > 300_000)
-      throw new AppError('Invalid command length or timeout (100–300000 ms).');
+    if (
+      input.command.length > 16_384 ||
+      input.timeout < 100 ||
+      !Number.isInteger(input.timeout) ||
+      input.timeout > 3_600_000
+    )
+      throw new AppError('Invalid command length or timeout (100–3600000 ms).');
     if (this.list().filter((j) => ['running', 'awaiting-approval'].includes(j.status)).length >= 8)
       throw new AppError('Too many pending commands. Cancel a command first.', 429);
     if (
@@ -96,6 +102,13 @@ export class TerminalManager implements SessionStore {
       ).length >= 3
     )
       throw new AppError('Client command limit reached.', 429);
+    input = {
+      ...input,
+      timeout: Math.min(
+        input.timeout,
+        (workspace.resources || defaultResources).timeoutSeconds * 1000,
+      ),
+    };
     const needsApproval = !readonly && workspace.approvalMode === 'ask';
     const publicJob: Job = {
       id: randomUUID(),

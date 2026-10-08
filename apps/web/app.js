@@ -32,6 +32,7 @@ const screens = [
   ['remote', 'Remote access', 'remote'],
   ['permissions', 'Permissions', 'shield'],
   ['activity', 'Activity', 'activity'],
+  ['changes', 'Changes', 'folder'],
   ['settings', 'Settings', 'settings'],
 ];
 const permissionNames = {
@@ -50,7 +51,9 @@ let state,
   lastFingerprint = '',
   busy = false,
   toastTimer,
-  activeFilter = '';
+  activeFilter = '',
+  diagnostics,
+  review;
 function currentScreen() {
   return location.hash.startsWith('#oauth=') ? 'oauth' : location.hash.slice(1) || 'dashboard';
 }
@@ -206,7 +209,7 @@ function workspaces() {
   return (
     heading(
       'Workspaces',
-      'Save your projects here. Only the active workspace is available to connected clients.',
+      'Save your projects here. Manual tokens use the active project; OAuth clients use approved projects.',
       button(`${icon('plus')} Add workspace`, 'workspace-modal', 'primary'),
     ) +
     panel(
@@ -215,7 +218,7 @@ function workspaces() {
         ? state.workspaces
             .map(
               (w) =>
-                `<div class="workspace-row"><div><h3>${e(w.name)} ${w.id === state.activeWorkspaceId ? pill('Active') : ''}</h3><p class="workspace-path">${e(w.path)}</p>${permissionTags(w.permissions)}</div><div class="actions">${w.id !== state.activeWorkspaceId ? button('Activate', 'activate', 'primary small', `data-id="${w.id}"`) : '<a class="button small" href="#permissions">Permissions</a>'}${button('Rename', 'rename', 'small', `data-id="${w.id}"`)}${button('Remove', 'remove-workspace', 'danger small', `data-id="${w.id}"`)}</div></div>`,
+                `<div class="workspace-row"><div><h3>${e(w.name)} ${w.id === state.activeWorkspaceId ? pill('Active') : ''}</h3><p class="workspace-path">${e(w.path)}</p>${permissionTags(w.permissions)}</div><div class="actions">${w.id !== state.activeWorkspaceId ? button('Activate', 'activate', 'primary small', `data-id="${w.id}"`) : '<a class="button small" href="#permissions">Permissions</a>'}${button('Resources', 'resources', 'small', `data-id="${w.id}"`)}${button('Rename', 'rename', 'small', `data-id="${w.id}"`)}${button('Remove', 'remove-workspace', 'danger small', `data-id="${w.id}"`)}</div></div>`,
             )
             .join('')
         : empty(
@@ -227,6 +230,17 @@ function workspaces() {
     `<div class="notice"><div><strong>Workspace access stays scoped</strong>Manual tokens follow the active project. OAuth agents can choose among the workspaces you approved. Each command mounts one workspace.</div></div>`
   );
 }
+function registeredClients() {
+  return panel(
+    'Registered OAuth clients',
+    (state.oauthClients || [])
+      .map(
+        (c) =>
+          `<div class="token-row"><div><h3>${e(c.client_name)}</h3><p>${e(c.client_id)}</p><p class="help">${c.redirect_uris.map(e).join('<br>')}</p></div>${button('Remove client', 'remove-oauth-client', 'danger small', `data-id="${e(c.client_id)}"`)}</div>`,
+      )
+      .join('') || '<div class="panel-body">No registered OAuth clients.</div>',
+  );
+}
 function connections() {
   const tokens = state.tokens.filter((t) => !t.revokedAt);
   return (
@@ -235,6 +249,7 @@ function connections() {
       'Approve OAuth clients or create a manual token. You choose the workspaces each agent can access.',
       button(`${icon('plus')} Create access token`, 'token-modal', 'primary'),
     ) +
+    registeredClients() +
     oauthRequestsPanel() +
     `<div class="grid two">${panel(
       'Client access',
@@ -259,11 +274,107 @@ function connections() {
   "mcpServers": {
     "mcp-code": {
       "command": "mcp-code-stdio",
-      "env": { "MCP_CODE_TOKEN": "&lt;your-token&gt;" }S
+      "env": { "MCP_CODE_TOKEN": "&lt;your-token&gt;" }
     }
   }
 }</pre></div>`,
     )}</div>`
+  );
+}
+function diagnosticsPanel() {
+  const rows = diagnostics
+    ? [
+        {
+          name: 'Docker',
+          ready: diagnostics.sandbox.available,
+          detail: diagnostics.sandbox.detail,
+        },
+        {
+          name: 'Development image',
+          ready: diagnostics.sandbox.imageReady,
+          detail: diagnostics.sandbox.imageReady
+            ? 'Ready for isolated commands.'
+            : 'Start Docker, then choose Build image.',
+        },
+        {
+          name: 'MCP server',
+          ready: diagnostics.mcpEnabled,
+          detail: diagnostics.mcpEnabled
+            ? 'Accepting authenticated connections.'
+            : 'Start MCP from the dashboard.',
+        },
+        ...diagnostics.providers,
+      ]
+    : [];
+  return panel(
+    'Connection checks',
+    `<div class="panel-body">${rows.length ? rows.map((r) => `<div class="meta-row"><strong>${e(r.name)}</strong>${pill(r.ready ? 'Ready' : 'Needs attention', r.ready ? '' : 'warn')}</div><p class="help">${e(r.detail)}</p>`).join('') : '<p>Check Docker, the development image, and your tunnel tools.</p>'}<div class="actions">${button('Check connections', 'diagnostics', 'small')}${diagnostics?.sandbox.available && !diagnostics.sandbox.imageReady ? button('Build image', 'build', 'small') : ''}</div></div>`,
+  );
+}
+function tunnelSettings(id, busy) {
+  if (!['ngrok', 'cloudflare'].includes(id)) return '';
+  const c = state.tunnelConfigs?.[id] || { mode: 'temporary' };
+  return `<p class="help">Address: ${c.mode === 'temporary' ? 'Provider-assigned address' : e(c.publicUrl)}</p>${busy ? '' : button('Configure address', 'tunnel-settings', 'small', `data-id="${id}"`)}`;
+}
+function tunnelSettingsModal(id) {
+  const c = state.tunnelConfigs?.[id] || { mode: 'temporary' };
+  modal(
+    'Tunnel address',
+    `<form id="tunnel-settings-form" class="form"><label>Address mode<select name="mode"><option value="temporary" ${c.mode === 'temporary' ? 'selected' : ''}>Provider-assigned address</option><option value="${id === 'ngrok' ? 'ngrok-domain' : 'cloudflare-named'}" ${c.mode !== 'temporary' ? 'selected' : ''}>Stable address</option></select></label><label>Public HTTPS address<input name="publicUrl" placeholder="https://your-domain.example" value="${e(c.publicUrl || '')}"></label>${id === 'cloudflare' ? `<label>Tunnel UUID<input name="tunnelId" value="${e(c.tunnelId || '')}"></label><label>Credentials file (absolute path)<input name="credentialsFile" value="${e(c.credentialsFile || '')}"></label><p class="help">Create a locally managed tunnel and route this hostname to its UUID in Cloudflare first. Credentials stay in the native file. The app exposes only its gateway through this tunnel.</p>` : '<p class="help">Use a domain available in your ngrok account. Your native ngrok configuration supplies authentication.</p>'}<p class="help">Stable-address fields are only used in Stable address mode. Changing the public address requires agents to authorize again.</p><button type="submit" class="button primary">Save address</button></form>`,
+  );
+  document.querySelector('#tunnel-settings-form').onsubmit = (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target));
+    const config = data.mode === 'temporary' ? { mode: 'temporary' } : data;
+    perform(async () => {
+      await api(`/tunnels/config/${id}`, 'PUT', config);
+      diagnostics = undefined;
+      closeModal();
+      await refresh(true);
+      toast('Tunnel address saved.');
+    });
+  };
+}
+function changes() {
+  const selected =
+    review && state.workspaces.some((w) => w.id === review.workspaceId) ? review : undefined;
+  const data = selected?.data;
+  return (
+    heading(
+      'Workspace changes',
+      'Review all current Git changes, including your edits and agent edits. Nothing is applied or reverted here.',
+    ) +
+    panel(
+      'Choose a workspace',
+      `<div class="panel-body"><label>Workspace<select id="review-workspace">${state.workspaces.map((w) => `<option value="${w.id}" ${w.id === selected?.workspaceId ? 'selected' : ''}>${e(w.name)}</option>`).join('')}</select></label>${button('Load changes', 'load-changes', 'primary')}<p class="help">Review runs in a read-only container. Click Load changes again for an updated snapshot.</p></div>`,
+    ) +
+    (data
+      ? !data.repository
+        ? panel(
+            'No Git repository',
+            '<div class="panel-body">This folder is not a Git repository. Initialize Git to review staged and working changes.</div>',
+          )
+        : panel(
+            'Changed files',
+            `<div class="panel-body">${data.files.length ? data.files.map((f) => `<p><code>${e(f.status)} ${e(f.path)}</code></p>`).join('') : '<p>No changes.</p>'}${data.truncated ? '<p class="help">This review is truncated. Some file content or entries were omitted.</p>' : ''}</div>`,
+          ) +
+          panel(
+            'Staged changes',
+            `<div class="panel-body"><pre class="snippet">${e(data.staged || 'No staged changes.')}</pre></div>`,
+          ) +
+          panel(
+            'Working changes',
+            `<div class="panel-body"><pre class="snippet">${e(data.working || 'No working changes.')}</pre></div>`,
+          ) +
+          data.untracked
+            .map((f) =>
+              panel(
+                e(f.path),
+                `<div class="panel-body"><pre class="snippet">${e(f.text)}</pre>${f.truncated ? '<p class="help">Preview truncated.</p>' : ''}</div>`,
+              ),
+            )
+            .join('')
+      : '')
   );
 }
 function remote() {
@@ -277,14 +388,14 @@ function remote() {
   const mode =
     remoteTab === 'local'
       ? `<h3>Connect on this computer</h3><p>Use your local dashboard and MCP endpoint without a public tunnel.</p>${busy ? button('Use local only', 'stop-tunnel', 'primary') : pill('Current mode')}<span class="field-label">Local MCP endpoint</span>${copyField(`http://127.0.0.1:${state.runtime.mcpPort}/mcp`)}`
-      : `<h3>${e(provider?.name || remoteTab)}</h3><p>${remoteTab === 'ngrok' ? 'Use your ngrok account to give the dashboard, OAuth, and MCP endpoint one HTTPS address.' : remoteTab === 'cloudflare' ? 'Create a temporary HTTPS address for the dashboard, OAuth, and MCP endpoint. No provider account credentials required.' : 'Connect through this installed tunnel provider.'}</p><p class="help">CLI: ${provider?.available ? 'Installed' : 'Not installed'}</p>${remoteTab === 'ngrok' ? '<p class="help">Configure once in your terminal: <code>ngrok config add-authtoken YOUR_TOKEN</code>. Credentials stay with ngrok.</p>' : ''}<div class="actions">${selected ? pill(tunnel.state === 'starting' ? 'Connecting' : 'Connected') : busy ? '<p class="help">Stop the active tunnel before switching methods.</p>' : button('Start ' + (provider?.name || remoteTab), 'start-tunnel', 'primary', `data-id="${e(remoteTab)}"`)}${['ngrok', 'cloudflare'].includes(remoteTab) ? `<a class="button plain" href="${remoteTab === 'ngrok' ? 'https://ngrok.com/docs/getting-started/' : 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/'}" target="_blank" rel="noreferrer">Installation guide</a>` : ''}</div>`;
+      : `<h3>${e(provider?.name || remoteTab)}</h3><p>${remoteTab === 'ngrok' ? 'Use your ngrok account to give the dashboard, OAuth, and MCP endpoint one HTTPS address.' : remoteTab === 'cloudflare' ? 'Use a quick tunnel or an existing named tunnel to give the dashboard, OAuth, and MCP endpoint one address.' : 'Connect through this installed tunnel provider.'}</p><p class="help">CLI: ${provider?.available ? 'Installed' : 'Not installed'}</p>${remoteTab === 'ngrok' ? '<p class="help">Configure once in your terminal: <code>ngrok config add-authtoken YOUR_TOKEN</code>. Credentials stay with ngrok.</p>' : ''}<div class="actions">${selected ? pill(tunnel.state === 'starting' ? 'Connecting' : 'Connected') : busy ? '<p class="help">Stop the active tunnel before switching methods.</p>' : button('Start ' + (provider?.name || remoteTab), 'start-tunnel', 'primary', `data-id="${e(remoteTab)}"`)}${['ngrok', 'cloudflare'].includes(remoteTab) ? `<a class="button plain" href="${remoteTab === 'ngrok' ? 'https://ngrok.com/docs/getting-started/' : 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/'}" target="_blank" rel="noreferrer">Installation guide</a>` : ''}</div>`;
   return (
     heading(
       'Remote access',
       'Choose how clients and your browser connect to this runtime.',
       busy ? button('Stop tunnel', 'stop-tunnel', 'danger') : '',
     ) +
-    `<div class="stack">${panel('Connection mode', `<div class="connection-tabs" role="tablist" aria-label="Connection methods">${tabs.map((tab) => `<button role="tab" aria-selected="${remoteTab === tab.id}" aria-controls="connection-panel" id="tab-${e(tab.id)}" tabindex="${remoteTab === tab.id ? 0 : -1}" data-action="connection-tab" data-id="${e(tab.id)}">${e(tab.name === 'Cloudflare quick tunnel' ? 'Cloudflare' : tab.name)}</button>`).join('')}</div><div id="connection-panel" role="tabpanel" aria-labelledby="tab-${e(remoteTab)}" class="panel-body connection-panel">${mode}</div>`)}${tunnel.state === 'connected' ? panel('One public address', `<div class="panel-body"><span class="field-label">Dashboard</span>${copyField(tunnel.publicUrl + '/')}<span class="field-label">MCP endpoint</span>${copyField(endpoint())}<div class="meta-row"><span>Provider</span><strong>${e(providerName)}</strong></div><p class="help">The dashboard requires an owner login. Agents use OAuth or bearer tokens to access MCP.</p>${isLocalDashboard() ? button('Create remote login code', 'remote-code', 'primary') + '<p class="help">Use this one-time code to sign in at the public address. Codes expire in five minutes; owner sessions last eight hours.</p>' : button('Sign out of dashboard', 'remote-logout', 'danger small')}</div>`, pill('Connected')) : tunnel.error ? `<div class="notice warning"><div><strong>Tunnel could not connect</strong>${e(tunnel.error)}</div></div>` : ''}${panel('Agent authorization', `<div class="panel-body"><p>OAuth approval lets you check exactly which saved workspaces an agent may access. Unselected projects stay private.</p><a href="#connections" class="button plain">Manage agent access</a></div>`)}</div>`
+    `<div class="stack">${diagnosticsPanel()}${panel('Remote dashboard sessions', `<div class="panel-body"><p class="help">Sign out every remote browser and invalidate unused login codes. Agent connections stay active.</p>${button('Sign out all remote sessions', 'remote-logout-all', 'danger small')}</div>`)}${panel('Connection mode', `<div class="connection-tabs" role="tablist" aria-label="Connection methods">${tabs.map((tab) => `<button role="tab" aria-selected="${remoteTab === tab.id}" aria-controls="connection-panel" id="tab-${e(tab.id)}" tabindex="${remoteTab === tab.id ? 0 : -1}" data-action="connection-tab" data-id="${e(tab.id)}">${e(tab.name === 'Cloudflare quick tunnel' ? 'Cloudflare' : tab.name)}</button>`).join('')}</div><div id="connection-panel" role="tabpanel" aria-labelledby="tab-${e(remoteTab)}" class="panel-body connection-panel">${mode}${tunnelSettings(remoteTab, busy)}</div>`)}${tunnel.state === 'connected' ? panel('One public address', `<div class="panel-body"><span class="field-label">Dashboard</span>${copyField(tunnel.publicUrl + '/')}<span class="field-label">MCP endpoint</span>${copyField(endpoint())}<div class="meta-row"><span>Provider</span><strong>${e(providerName)}</strong></div><p class="help">The dashboard requires an owner login. Agents use OAuth or bearer tokens to access MCP.</p>${isLocalDashboard() ? button('Create remote login code', 'remote-code', 'primary') + '<p class="help">Use this one-time code to sign in at the public address. Codes expire in five minutes; owner sessions last eight hours.</p>' : button('Sign out of dashboard', 'remote-logout', 'danger small')}</div>`, pill('Connected')) : tunnel.error ? `<div class="notice warning"><div><strong>Tunnel could not connect</strong>${e(tunnel.error)}</div></div>` : ''}${panel('Agent authorization', `<div class="panel-body"><p>OAuth approval lets you check exactly which saved workspaces an agent may access. Unselected projects stay private.</p><a href="#connections" class="button plain">Manage agent access</a></div>`)}</div>`
   );
 }
 function oauthRequestsPanel() {
@@ -406,7 +517,7 @@ function render() {
   if (screen !== 'oauth' && !screens.some((s) => s[0] === screen)) screen = 'dashboard';
   const title =
     screen === 'oauth' ? 'Agent authorization' : screens.find((s) => s[0] === screen)[1];
-  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><img src="/icon.svg" alt="">MCP <span>Code</span></div><nav aria-label="Main navigation">${screens.map(([id, label, symbol]) => `<a href="#${id}" class="nav-item ${screen === id ? 'active' : ''}" ${screen === id ? 'aria-current="page"' : ''}>${icon(symbol)}${label}</a>`).join('')}</nav><div class="sidebar-footer"><div class="local-badge"><span class="dot"></span>${isLocalDashboard() ? 'Running on your machine' : 'Connected to your runtime'}</div>No hosted MCP Code services.<br>Your folders stay local.<div class="version">MCP Code v0.1.0</div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb">MCP Code / <strong>${title}</strong></div><div class="top-right"><span class="runtime-chip"><span class="dot"></span>Runtime running</span><span class="workspace-chip">${e(active()?.name || 'No active workspace')}</span></div></header><div class="content">${{ dashboard, workspaces, connections, remote, permissions, activity, settings, oauth: oauthConsent }[screen]()}</div></main></div>`;
+  app.innerHTML = `<div class="shell"><aside class="sidebar"><div class="brand"><img src="/icon.svg" alt="">MCP <span>Code</span></div><nav aria-label="Main navigation">${screens.map(([id, label, symbol]) => `<a href="#${id}" class="nav-item ${screen === id ? 'active' : ''}" ${screen === id ? 'aria-current="page"' : ''}>${icon(symbol)}${label}</a>`).join('')}</nav><div class="sidebar-footer"><div class="local-badge"><span class="dot"></span>${isLocalDashboard() ? 'Running on your machine' : 'Connected to your runtime'}</div>No hosted MCP Code services.<br>Your folders stay local.<div class="version">MCP Code v0.1.0</div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb">MCP Code / <strong>${title}</strong></div><div class="top-right"><span class="runtime-chip"><span class="dot"></span>Runtime running</span><span class="workspace-chip">${e(active()?.name || 'No active workspace')}</span></div></header><div class="content">${{ dashboard, workspaces, connections, remote, permissions, activity, changes, settings, oauth: oauthConsent }[screen]()}</div></main></div>`;
   bindForms();
 }
 function modal(title, body) {
@@ -416,6 +527,26 @@ function modal(title, body) {
 }
 function closeModal() {
   document.querySelector('#modal-root').innerHTML = '';
+}
+function resourcesModal(id) {
+  const w = state.workspaces.find((w) => w.id === id);
+  const r = w.resources || { memoryMb: 512, cpus: 1, timeoutSeconds: 300 };
+  modal(
+    'Workspace resources',
+    `<form id="resources-form" class="form"><p>${e(w.name)}</p><label>Memory (MB)<input type="number" name="memoryMb" min="256" max="32768" step="1" value="${r.memoryMb}" required></label><label>CPU cores<input type="number" name="cpus" min="0.5" max="16" step="0.5" value="${r.cpus}" required></label><label>Maximum command time (seconds)<input type="number" name="timeoutSeconds" min="1" max="3600" step="1" value="${r.timeoutSeconds}" required></label><p class="help">Limits apply to each command. Saving cancels this workspace’s running and pending commands. Choose limits your computer can support.</p><button type="submit" class="button primary">Save resources</button></form>`,
+  );
+  document.querySelector('#resources-form').onsubmit = (event) => {
+    event.preventDefault();
+    const resources = Object.fromEntries(
+      [...new FormData(event.target)].map(([k, v]) => [k, Number(v)]),
+    );
+    perform(async () => {
+      await api(`/workspaces/${id}`, 'PATCH', { resources });
+      closeModal();
+      toast('Workspace resources saved.');
+      await refresh(true);
+    });
+  };
 }
 function workspaceModal() {
   modal(
@@ -554,6 +685,8 @@ document.addEventListener('click', (event) => {
   if (action === 'close-modal') return closeModal();
   if (action === 'workspace-modal') return workspaceModal();
   if (action === 'token-modal') return tokenModal();
+  if (action === 'tunnel-settings') return tunnelSettingsModal(id);
+  if (action === 'resources') return resourcesModal(id);
   if (action === 'go-workspaces') {
     location.hash = 'workspaces';
     return;
@@ -571,6 +704,33 @@ document.addEventListener('click', (event) => {
   }
   perform(async () => {
     switch (action) {
+      case 'remove-oauth-client':
+        if (!confirm('Remove this client, revoke all its grants, and cancel its commands?')) return;
+        await api(`/oauth/clients/${id}`, 'DELETE');
+        toast('OAuth client removed.');
+        break;
+      case 'remote-logout-all':
+        if (!confirm('Sign out all remote dashboard sessions and invalidate unused login codes?'))
+          return;
+        await api('/remote/logout-all', 'POST');
+        if (!isLocalDashboard()) {
+          location.reload();
+          return;
+        }
+        toast('Remote sessions signed out.');
+        break;
+      case 'diagnostics':
+        diagnostics = await api('/diagnostics');
+        providers = await api('/tunnels/providers');
+        break;
+      case 'load-changes': {
+        const workspaceId = document.querySelector('#review-workspace').value;
+        if (!workspaceId) throw new Error('Add a workspace first.');
+        toast('Loading workspace changes…');
+        const data = await api(`/workspaces/${workspaceId}/changes`);
+        review = { workspaceId, data };
+        break;
+      }
       case 'pick-folder': {
         const result = await api('/workspaces/pick', 'POST');
         if (result.path)
@@ -675,6 +835,8 @@ document.addEventListener('click', (event) => {
         clearInterval(poll);
         return;
       case 'refresh':
+        diagnostics = await api('/diagnostics');
+        providers = await api('/tunnels/providers');
         break;
     }
     await refresh(true);

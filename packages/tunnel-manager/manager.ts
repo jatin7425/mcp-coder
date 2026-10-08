@@ -1,3 +1,4 @@
+import { tunnelConfigSchema, type TunnelConfig } from './config.js';
 import { AppError } from '../shared/types.js';
 import type { TunnelProvider } from './provider.js';
 import { CloudflareProvider } from './cloudflare.js';
@@ -14,6 +15,35 @@ export class TunnelManager {
   register(provider: TunnelProvider) {
     if (this.providers.has(provider.id)) throw new Error('Duplicate tunnel provider.');
     this.providers.set(provider.id, provider);
+  }
+  configure(id: string, value: unknown): TunnelConfig {
+    if (this.starting || ['starting', 'connected'].includes(this.status().state))
+      throw new AppError('Stop the tunnel before changing its configuration.', 409);
+    const provider = this.providers.get(id);
+    if (!provider?.configure)
+      throw new AppError('This provider does not support saved configuration.');
+    const config = tunnelConfigSchema.parse(value);
+    if (
+      (config.mode === 'ngrok-domain' && id !== 'ngrok') ||
+      (config.mode === 'cloudflare-named' && id !== 'cloudflare')
+    )
+      throw new AppError('Configuration does not match the provider.');
+    provider.configure(config);
+    return config;
+  }
+  async diagnostics() {
+    return Promise.all(
+      [...this.providers.values()].map(async (p) => ({
+        id: p.id,
+        name: p.name,
+        ...(p.diagnostics
+          ? await p.diagnostics()
+          : {
+              ready: await p.checkAvailability(),
+              detail: 'Check provider installation and native configuration.',
+            }),
+      })),
+    );
   }
   async availability() {
     return Promise.all(
@@ -39,6 +69,7 @@ export class TunnelManager {
     this.starting = true;
     const generation = ++this.generation;
     try {
+      if (provider.status().state === 'error') await provider.stop();
       const result = await provider.start(localPort);
       if (generation !== this.generation) {
         await provider.stop();

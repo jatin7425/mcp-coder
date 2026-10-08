@@ -71,7 +71,17 @@ try {
     try {
       await fetch(base + '/api/shutdown', { method: 'POST', headers: { 'x-mcp-code-csrf': csrf } });
     } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Docker cleanup and Windows process teardown can take longer than 300 ms.
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      try {
+        await access(join(config, 'daemon.lock'));
+      } catch {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('Packaged daemon did not release its lock within 15 seconds.');
   };
   assert.match(await (await fetch(base)).text(), /MCP Code/);
   assert.equal((await fetch(base + '/app.js')).status, 200);

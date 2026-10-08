@@ -601,3 +601,131 @@ test('workspace switches preserve OAuth jobs; removal narrows grants independent
     assert.ok(record.revokedAt);
   }
 });
+
+test('resource limits persist and reject invalid settings; OAuth client removal invalidates grants and pending approvals', async (t) => {
+  const f = await fixture(t);
+  const workspace = f.workspaces[0];
+  const resources = { memoryMb: 2048, cpus: 2, timeoutSeconds: 600 };
+  assert.equal(
+    (await f.api(`/workspaces/${workspace.id}`, 'PATCH', { resources, approvalMode: 'ask' }))
+      .status,
+    200,
+  );
+  for (const bad of [
+    { ...resources, memoryMb: 0 },
+    { ...resources, cpus: 100 },
+    { ...resources, timeoutSeconds: 3601 },
+  ])
+    assert.equal(
+      (await f.api(`/workspaces/${workspace.id}`, 'PATCH', { resources: bad })).status,
+      400,
+    );
+  const client = await f.register('client_secret_post');
+  const auth = await f.authorize(client);
+  const id = new URL(auth.headers.get('location')!).hash.slice('#oauth='.length);
+  const decision = await f.api(`/oauth/requests/${id}/decision`, 'POST', {
+    approved: true,
+    workspaceIds: [workspace.id],
+  });
+  const issued = await f.token(client, {
+    grant_type: 'authorization_code',
+    code: new URL(decision.body.redirectUrl).searchParams.get('code')!,
+    code_verifier: verifier,
+    redirect_uri: client.redirect_uris[0],
+    resource: f.mcp + '/mcp',
+  });
+  assert.equal(issued.status, 200);
+  await f.bridge(issued.body.access_token, 'terminal_execute', {
+    command: 'pwd',
+    background: true,
+  });
+  await f.authorize(client);
+  const before = (await f.api('/status')).body;
+  assert.equal(before.oauthClients.length, 1);
+  assert.ok(!JSON.stringify(before.oauthClients).includes('secret'));
+  assert.equal((await f.api(`/oauth/clients/${client.client_id}`, 'DELETE')).status, 200);
+  const after = (await f.api('/status')).body;
+  assert.equal(after.oauthClients.length, 0);
+  assert.equal(after.oauthRequests.length, 0);
+  assert.ok(after.jobs.every((j: any) => !['running', 'awaiting-approval'].includes(j.status)));
+  assert.equal((await f.bridge(issued.body.access_token, 'list_workspaces')).status, 401);
+  assert.notEqual(
+    (
+      await f.token(client, {
+        grant_type: 'refresh_token',
+        refresh_token: issued.body.refresh_token,
+        resource: f.mcp + '/mcp',
+      })
+    ).status,
+    200,
+  );
+  await f.restart();
+  assert.deepEqual((await f.api('/status')).body.workspaces[0].resources, resources);
+  assert.equal((await f.api('/status')).body.oauthClients.length, 0);
+});
+
+test('sign out all invalidates every owner session and unused login codes', async (t) => {
+  const f = await fixture(t);
+  await f.api('/tunnels/start', 'POST', { provider: 'fixture' });
+  const cookies: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    const code = (await f.api('/remote/code', 'POST')).body.code;
+    const login = await publicRequest(
+      f.mcp,
+      '/owner/login',
+      'POST',
+      { code },
+      { origin: 'https://fixture.example' },
+    );
+    assert.equal(login.status, 200);
+    cookies.push(login.headers['set-cookie']![0].split(';')[0]);
+  }
+  const unused = (await f.api('/remote/code', 'POST')).body.code;
+  assert.equal((await fetch(f.base + '/api/remote/logout-all', { method: 'POST' })).status, 403);
+  assert.equal((await f.api('/remote/logout-all', 'POST')).status, 200);
+  for (const cookie of cookies)
+    assert.equal(
+      (await publicRequest(f.mcp, '/api/bootstrap', 'GET', undefined, { cookie })).status,
+      401,
+    );
+  assert.equal(
+    (
+      await publicRequest(
+        f.mcp,
+        '/owner/login',
+        'POST',
+        { code: unused },
+        { origin: 'https://fixture.example' },
+      )
+    ).status,
+    401,
+  );
+});
+
+test('saved tunnel configuration persists, requires owner CSRF, and rejects changes during a connection', async (t) => {
+  const f = await fixture(t);
+  const config = { mode: 'ngrok-domain', publicUrl: 'https://mcp.example.com' };
+  assert.equal(
+    (
+      await fetch(f.base + '/api/tunnels/config/ngrok', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(config),
+      })
+    ).status,
+    403,
+  );
+  assert.equal((await f.api('/tunnels/config/ngrok', 'PUT', config)).status, 200);
+  assert.equal(
+    (await f.api('/tunnels/config/ngrok', 'PUT', { ...config, publicUrl: 'http://bad.example' }))
+      .status,
+    400,
+  );
+  await f.restart();
+  assert.deepEqual((await f.api('/status')).body.tunnelConfigs.ngrok, config);
+  await f.api('/tunnels/start', 'POST', { provider: 'fixture' });
+  assert.equal((await f.api('/tunnels/config/ngrok', 'PUT', { mode: 'temporary' })).status, 409);
+  const checks = await f.api('/diagnostics');
+  assert.equal(checks.status, 200);
+  assert.ok(checks.body.providers.some((p: any) => p.id === 'fixture' && p.ready));
+});
