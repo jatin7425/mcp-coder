@@ -1,5 +1,5 @@
 {
-  "name": "mcp-code",
+  "name": "@jatin7425/mcp-code",
   "version": "0.1.0",
   "description": "Local-first sandboxed coding runtime for MCP clients",
   "type": "module",
@@ -54,5 +54,17 @@
     "linux",
     "darwin",
     "win32"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jatin7425/mcp-coder.git"
+  },
+  "homepage": "https://github.com/jatin7425/mcp-coder#readme",
+  "bugs": {
+    "url": "https://github.com/jatin7425/mcp-coder/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }

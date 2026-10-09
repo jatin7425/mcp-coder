@@ -60,7 +60,8 @@ try {
       settings: { uiPort, mcpPort, retentionDays: 7 },
     }),
   );
-  const entry = join(directory, 'node_modules/mcp-code/dist/apps/cli/main.js');
+  const installed = join(directory, 'node_modules', ...manifest.name.split('/'));
+  const entry = join(installed, 'dist/apps/cli/main.js');
   const env = { ...process.env, MCP_CODE_HOME: config, MCP_CODE_NO_BROWSER: '1' };
   const first = await exec(process.execPath, [entry], { env, timeout: 30000 });
   assert.match(first.stdout, /Runtime started/);
@@ -91,7 +92,7 @@ try {
   const initial = await (
     await fetch(base + '/api/status', { headers: { 'x-mcp-code-csrf': csrf } })
   ).json();
-  await access(join(directory, 'node_modules/mcp-code/Dockerfile.sandbox'));
+  await access(join(installed, 'Dockerfile.sandbox'));
   if (initial.sandbox.available && initial.sandbox.imageReady) {
     const buildResponse = await fetch(base + '/api/sandbox/build', {
       method: 'POST',

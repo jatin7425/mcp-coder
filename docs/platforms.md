@@ -20,7 +20,7 @@ npm run build
 npm start
 ```
 
-For a packed distribution, install `mcp-code-0.1.0.tgz` with npm and run `mcp-code`. npm creates the appropriate Windows command shim automatically. The package smoke test invokes npm's JavaScript entry point through Node, so it does not rely on executing a `.cmd` file through `execFile`.
+For a packed distribution, install `jatin7425-mcp-code-0.1.0.tgz` with npm and run `mcp-code`. npm creates the appropriate Windows command shim automatically. The package smoke test invokes npm's JavaScript entry point through Node, so it does not rely on executing a `.cmd` file through `execFile`.
 
 On Windows, switch Docker Desktop to **Linux containers**, and allow the selected project drive/folder to be shared. Local drive paths with spaces and Unicode are supported; network/UNC shares are rejected. On macOS, grant Docker Desktop access to the selected project folder when requested. The daemon reports a wrong container-engine mode and never falls back to host command execution.
 

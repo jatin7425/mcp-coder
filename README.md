@@ -32,17 +32,17 @@ The sandbox image includes Node.js, npm/npx, Python, pip, Git, ripgrep, make, co
 The package includes the `mcp-code` and `mcp-code-stdio` executables and is ready for a maintainer to publish. **This source distribution has not been published to the npm registry.** After publication, users can run:
 
 ```bash
-npx mcp-code
+npx @jatin7425/mcp-code
 # or
-npm install -g mcp-code
+npm install -g @jatin7425/mcp-code
 mcp-code
 ```
 
-Until then, use the source commands above or install a locally packed tarball. Do not assume the current registry package with that name belongs to this repository.
+Until then, use the source commands above or install a locally packed tarball. The unscoped package `mcp-code` belongs to another publisher; use `@jatin7425/mcp-code` for this project.
 
 ```bash
 npm pack
-npm install -g ./mcp-code-0.1.0.tgz
+npm install -g ./jatin7425-mcp-code-0.1.0.tgz
 ```
 
 ## Connect a client
